@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>BrainFlow — Your AI Assistant</title>
 <link rel="icon" id="favicon-link" href="" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -138,9 +138,14 @@
   .switch-line a{ color:var(--blue); cursor:pointer; font-weight:600; text-decoration:none; }
 
   /* ---------- App Screen ---------- */
-  #app-screen{
-    position:relative; z-index:2; height:100%; display:none; grid-template-columns: 280px 1fr;
-  }
+ #app-screen{
+    position:relative;
+    z-index:2;
+    display:none;
+    grid-template-columns:280px 1fr;
+    height:100dvh;
+    overflow:hidden;
+}
   #app-screen.visible{ display:grid; }
 
   #sidebar{
@@ -556,6 +561,9 @@
   </div>
 </div>
 <div id="app-screen">
+  <div id="app-screen">
+...
+</div>
   <aside id="sidebar">
     <div id="sidebar-header">
       <div class="brand-mark">
