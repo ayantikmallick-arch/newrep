@@ -603,7 +603,7 @@ const googleProvider = new GoogleAuthProvider();
    so the app works out of the box; anyone can still override it with their
    own key via the Settings (gear) button, which is stored in this
    browser's localStorage and takes priority over the default. */
-const GEMINI_API_KEY_STORAGE = "brainflow_gemini_api_key";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;D
 const GEMINI_MODEL = "gemini-2.5-flash";
 const DEFAULT_GEMINI_API_KEY = "AQ.Ab8RN6KoMx7tFDcweyb_92dLXj8NNO0Hc15qW88KvNRs-KDwmg";
 
