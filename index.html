@@ -596,59 +596,39 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
-/* ---------------- Gemini ----------------
-   Google AI Studio now issues keys in two formats: the classic "AIza..."
-   keys and newer keys that start with "AQ." (both are valid Gemini API
-   keys — see aistudio.google.com/apikey). A default key is baked in below
-   so the app works out of the box; anyone can still override it with their
-   own key via the Settings (gear) button, which is stored in this
-   browser's localStorage and takes priority over the default. */
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;D
-const GEMINI_MODEL = "gemini-2.5-flash";
-const DEFAULT_GEMINI_API_KEY = "AQ.Ab8RN6KoMx7tFDcweyb_92dLXj8NNO0Hc15qW88KvNRs-KDwmg";
-
-function getGeminiApiKey(){
-  const stored = (localStorage.getItem(GEMINI_API_KEY_STORAGE) || "").trim();
-  return stored || DEFAULT_GEMINI_API_KEY;
-}
-function setGeminiApiKey(key){
-  localStorage.setItem(GEMINI_API_KEY_STORAGE, (key||"").trim());
-}
-
-const BRAINFLOW_SYSTEM_INSTRUCTION = `You are BrainFlow, a helpful AI assistant. Speak as BrainFlow at all times.
-Never state, confirm, or hint at which company built you, which model or API you run on, or that you are "Gemini", "trained by Google", or any other underlying provider name. If someone asks who made you or what model you are, simply say you're BrainFlow, an AI assistant, without naming any company or model. Otherwise answer normally and helpfully.`;
-
-/* Builds the request in the exact shape/order the Gemini generateContent
-   REST API expects: POST to the model's :generateContent endpoint, with
-   the API key passed via the x-goog-api-key header (the current standard —
-   see ai.google.dev/api), Content-Type set, then a JSON body of
-   { systemInstruction, contents }. */
+/* ---------------- Gemini ---------------- */
 async function askGemini(historyForApi){
-  const apiKey = getGeminiApiKey();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
-  const res = await fetch(url, {
+  const res = await fetch("/api/chat", {
     method: "POST",
-    headers: {
-      "x-goog-api-key": apiKey,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      systemInstruction: { role: "system", parts: [{ text: BRAINFLOW_SYSTEM_INSTRUCTION }] },
-      contents: historyForApi
-    })
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contents: historyForApi })
   });
   if(!res.ok){
     const errText = await res.text().catch(()=> "");
-    if(res.status === 401 || res.status === 403){
-      openSettingsModal('That API key was rejected (401/403). Double-check you copied the whole key from aistudio.google.com/apikey and that it\'s enabled for the Gemini API.');
-      throw new Error(`Gemini rejected the API key (${res.status}). Update it via the gear icon.`);
-    }
     throw new Error(`Gemini request failed (${res.status}): ${errText.slice(0,200)}`);
   }
   const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("") || "";
+  const text = data?.text || data?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("") || "";
   if(!text) throw new Error("Gemini returned an empty response.");
   return text;
+}
+
+async function generateChatTitle(userText, aiText){
+  try{
+    const prompt = `Based on this exchange, write a short chat title (3-5 words, no quotes, no punctuation at the end, plain text only).\nUser: ${userText}\nAssistant: ${aiText}`;
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ role:'user', parts:[{ text: prompt }] }], titleOnly: true })
+    });
+    if(!res.ok) return null;
+    const data = await res.json();
+    let title = (data?.text || data?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("") || "").trim();
+    title = title.replace(/^["'\s]+|["'\s]+$/g, "").split("\n")[0];
+    return title ? title.slice(0,48) : null;
+  }catch(e){
+    return null;
+  }
 }
 
 /* ---- Files & images: read as base64 for Gemini's inlineData parts ---- */
@@ -660,30 +640,6 @@ function fileToBase64(file){
     reader.onerror = ()=> reject(new Error("Couldn't read " + file.name));
     reader.readAsDataURL(file);
   });
-}
-
-async function generateChatTitle(userText, aiText){
-  try{
-    const apiKey = getGeminiApiKey();
-    if(!apiKey) return null;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
-    const prompt = `Based on this exchange, write a short chat title (3-5 words, no quotes, no punctuation at the end, plain text only).\nUser: ${userText}\nAssistant: ${aiText}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "x-goog-api-key": apiKey,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ contents: [{ role:'user', parts:[{ text: prompt }] }] })
-    });
-    if(!res.ok) return null;
-    const data = await res.json();
-    let title = data?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("").trim() || "";
-    title = title.replace(/^["'\s]+|["'\s]+$/g, "").split("\n")[0];
-    return title ? title.slice(0,48) : null;
-  }catch(e){
-    return null;
-  }
 }
 
 /* ---------------- Particle background ---------------- */
@@ -748,7 +704,6 @@ const emailForm = document.getElementById('email-form');
 const emailSubmitBtn = document.getElementById('email-submit-btn');
 const authError = document.getElementById('auth-error');
 const switchLine = document.getElementById('switch-line');
-const switchLink = document.getElementById('switch-link');
 let mode = 'signin';
 
 function setMode(m){
@@ -759,11 +714,12 @@ function setMode(m){
   switchLine.innerHTML = m==='signup'
     ? 'Already have an account? <a id="switch-link">Sign in</a>'
     : "Don't have an account? <a id=\"switch-link\">Create one</a>";
-  document.getElementById('switch-link').addEventListener('click', ()=> setMode(m==='signup'?'signin':'signup'));
+  const nextMode = m==='signup' ? 'signin' : 'signup';
+  document.getElementById('switch-link').addEventListener('click', ()=> setMode(nextMode), { once: true });
   authError.textContent='';
 }
 tabBtns.forEach(b=> b.addEventListener('click', ()=> setMode(b.dataset.mode)));
-document.getElementById('switch-link').addEventListener('click', ()=> setMode('signup'));
+document.getElementById('switch-link').addEventListener('click', ()=> setMode('signup'), { once: true });
 
 emailForm.addEventListener('submit', async (e)=>{
   e.preventDefault();
@@ -776,7 +732,8 @@ emailForm.addEventListener('submit', async (e)=>{
     if(mode==='signup'){
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       if(name) await updateProfile(cred.user, { displayName: name });
-      await ensureUserDoc(cred.user);
+      await cred.user.reload();
+      await ensureUserDoc(auth.currentUser || cred.user, name);
     } else {
       await signInWithEmailAndPassword(auth, email, password);
     }
@@ -807,28 +764,30 @@ function friendlyAuthError(err){
   return err.message || 'Something went wrong. Please try again.';
 }
 
-async function ensureUserDoc(user){
+async function ensureUserDoc(user, displayName){
   const ref = doc(db, 'users', user.uid);
   const snap = await getDoc(ref);
   if(!snap.exists()){
     await setDoc(ref, {
-      name: user.displayName || '',
+      name: displayName || user.displayName || '',
       email: user.email || '',
       photoURL: user.photoURL || '',
       createdAt: serverTimestamp()
     });
   }
 }
-/* ---------------- Settings modal (Gemini API key) ---------------- */
+/* ---------------- Settings modal ---------------- */
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsKeyInput = document.getElementById('settings-key-input');
 const settingsNote = document.getElementById('settings-note');
+const settingsSaveBtn = document.getElementById('settings-save-btn');
 
 function openSettingsModal(note){
-  settingsKeyInput.value = getGeminiApiKey();
-  settingsNote.textContent = note || '';
+  settingsKeyInput.value = '';
+  settingsKeyInput.disabled = true;
+  settingsKeyInput.placeholder = 'Configured securely on the server';
+  settingsNote.textContent = note || 'Gemini is configured with a server-side Vercel environment variable.';
   settingsOverlay.classList.add('open');
-  setTimeout(()=> settingsKeyInput.focus(), 50);
 }
 function closeSettingsModal(){
   settingsOverlay.classList.remove('open');
@@ -837,26 +796,7 @@ function closeSettingsModal(){
 document.getElementById('settings-btn').addEventListener('click', ()=> openSettingsModal());
 document.getElementById('settings-cancel-btn').addEventListener('click', closeSettingsModal);
 settingsOverlay.addEventListener('click', (e)=>{ if(e.target === settingsOverlay) closeSettingsModal(); });
-const settingsSaveBtn = document.getElementById('settings-save-btn');
-settingsSaveBtn.addEventListener('click', ()=>{
-  const key = settingsKeyInput.value.trim();
-  if(!key){
-    settingsNote.textContent = 'Paste a key first, or press Cancel.';
-    return;
-  }
-  if(!/^AIza[0-9A-Za-z_-]{20,}$/.test(key) && !/^AQ\.[0-9A-Za-z_-]{20,}$/.test(key)){
-    settingsNote.textContent = 'That doesn\'t look like a Gemini key (they start with "AIza…" or "AQ."). Save anyway if you\'re sure.';
-    // Allow saving anyway on a second click, since Google may issue other formats.
-    if(settingsSaveBtn.dataset.confirmOnce !== '1'){
-      settingsSaveBtn.dataset.confirmOnce = '1';
-      return;
-    }
-  }
-  setGeminiApiKey(key);
-  settingsSaveBtn.dataset.confirmOnce = '0';
-  showToast('Gemini API key saved.');
-  closeSettingsModal();
-});
+settingsSaveBtn.addEventListener('click', closeSettingsModal);
 
 /* ---------------- App state ---------------- */
 let currentUser = null;
